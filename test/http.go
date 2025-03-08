@@ -3,6 +3,7 @@ package test
 import (
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"strings"
 	"testing"
@@ -11,15 +12,21 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func hxClient() *http.Client {
-	return &http.Client{
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
+var httpClient *http.Client
+
+func HxClient() *http.Client {
+	if httpClient != nil {
+		return httpClient
 	}
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		panic(err)
+	}
+	httpClient = &http.Client{Jar: jar}
+	return httpClient
 }
 
-func hxRequest(t *testing.T, method string, url string, body io.Reader) *http.Request {
+func HxRequest(t *testing.T, method string, url string, body io.Reader) *http.Request {
 	req, err := http.NewRequest(method, url, body)
 	assert.NoError(t, err)
 	req.Header.Add("Hx-Request", "true")
@@ -27,22 +34,22 @@ func hxRequest(t *testing.T, method string, url string, body io.Reader) *http.Re
 }
 
 func HxGet(t *testing.T, url string) (*http.Response, *goquery.Document) {
-	req := hxRequest(t, http.MethodGet, url, nil)
-	res, err := hxClient().Do(req)
+	req := HxRequest(t, http.MethodGet, url, nil)
+	res, err := HxClient().Do(req)
 	assert.NoError(t, err)
-	return res, hxDoc(t, res)
+	return res, HxDoc(t, res)
 }
 
 func HxPost(t *testing.T, url string, data map[string]string) (*http.Response, *goquery.Document) {
-	req := hxRequest(t, http.MethodPost, url, formDataReader(data))
+	req := HxRequest(t, http.MethodPost, url, formDataReader(data))
 	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-	res, err := hxClient().Do(req)
+	res, err := HxClient().Do(req)
 	assert.NoError(t, err)
-	doc := hxDoc(t, res)
+	doc := HxDoc(t, res)
 	return res, doc
 }
 
-func hxDoc(t *testing.T, res *http.Response) *goquery.Document {
+func HxDoc(t *testing.T, res *http.Response) *goquery.Document {
 	defer res.Body.Close()
 	doc, err := goquery.NewDocumentFromReader(res.Body)
 	assert.NoError(t, err)
@@ -65,11 +72,6 @@ func AssertOk(t *testing.T, res *http.Response) bool {
 	return assert.Equal(t, http.StatusOK, res.StatusCode)
 }
 
-func AssertRedirect(t *testing.T, location string, res *http.Response) bool {
-	return assert.Equal(t, http.StatusFound, res.StatusCode) &&
-		assert.Equal(t, location, res.Header.Get("Location"))
-}
-
 func AssertNoErrorMsg(t *testing.T, doc *goquery.Document) bool {
 	msg := FindErrorMsg(doc)
 	return assert.Empty(t, msg, "%s", msg)
@@ -77,7 +79,7 @@ func AssertNoErrorMsg(t *testing.T, doc *goquery.Document) bool {
 
 func assertCookie(t *testing.T, res *http.Response, name string) bool {
 	cookies := res.Cookies()
-	assert.Len(t, cookies, 1)
+	assert.Len(t, cookies, 1, "No cookies")
 	cookie := cookies[0]
 	assert.Equal(t, name, cookie.Name)
 	return assert.NotEmpty(t, cookie.Value)
